@@ -1,3 +1,5 @@
 .vs
 x64
 AtomProc/x64
+cmake-build-debug
+.idea

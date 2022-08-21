@@ -15,6 +15,8 @@
 #define RING_CARBON_ORDER_DUMP_PATH ".atomproc_ring_carbon_order.bin"
 #define RING_CARBON_CONCAT_DUMP_PATH ".atomproc_ring_carbon_concat.bin"
 #define DISTANCE_DUMP_PATH ".atomproc_distance.bin"
+#define FLT_MIN std::numeric_limits<float>::min()
+#define FLT_MAX std::numeric_limits<float>::max()
 
 using namespace AP;
 
@@ -23,7 +25,6 @@ std::unique_ptr<AtomProc> AtomProc::make_atom_proc(std::string data_path, std::s
     std::unique_ptr<AtomProc> proc(new AtomProc());
     proc->process_results = std::nullopt;
     proc->dump_temp_products = dump_temp_products;
-    
     if (bin_path != "" && std::filesystem::exists(bin_path)) {
         std::ifstream reader(bin_path, std::ios::binary);
         if (!reader.good()) {
@@ -48,7 +49,6 @@ std::unique_ptr<AtomProc> AtomProc::make_atom_proc(std::string data_path, std::s
             mat_dump(writer, proc->atom_dihedrals);
             writer.close();
         }
-
     }
 
     std::cout << "Report: " << std::endl;
@@ -67,7 +67,6 @@ bool AP::AtomProc::parse_mat_from_data(std::string data_file) {
         std::cerr << "Dumpfile not found!" << std::endl;
         return false;
     }
-
     char line[10240] = { 0 };
     while (!dump.eof()) {
         dump.getline(line, sizeof(line));
@@ -153,9 +152,7 @@ std::optional<std::string> AP::AtomProc::dump_result_to_data(std::string header_
     if (!writer.good()) {
         THROW std::string("Bad path to write: ") + data_file;
     }
-
     writer << "LAMMPS data file via write_data, version 8 Apr 2021, timestep = 0" << std::endl << std::endl;
-
     writer << process_results->atom_data_molecule.rows() << " atoms" << std::endl;
     writer << "9 atom types" << std::endl;
     writer << process_results->atom_bond.rows() << " bonds" << std::endl;
@@ -247,25 +244,22 @@ std::optional<std::string> AP::AtomProc::dump_result_to_data(std::string header_
 
 std::optional<std::string> AP::AtomProc::run(bool cache_result) {
     std::vector<int> position = locate(atom_data_molecule.col(2), (double) delete_type);
-    
     process_results = std::nullopt;
-    
     if (position.size() == 0) {
         THROW "Cannot find delete_type in atom_data_molecule";
     }
-
     Eigen::MatrixXd ring_carbon = atom_data_molecule(position, Eigen::all);
-
     // 将在一个苯环上的芳香碳原子放在连续六行
     Eigen::MatrixXd ring_carbon_new = Eigen::MatrixXd::Zero(length(ring_carbon), 13);
     if (auto ring_carbon_new_opt = mat_load_if_exists(RING_CARBON_NEW_DUMP_PATH)) {
         ring_carbon_new = *ring_carbon_new_opt;
     } else {
         int mol_number = (int) ring_carbon.col(1).maxCoeff();
-
         int max_threads = min((int) std::thread::hardware_concurrency(), mol_number);
         // max_threads = 1;
         int p_per_thread = mol_number / max_threads;
+        std::cout << "Parallel info: " << max_threads << " threads for " << mol_number << " molecules" << std::endl;
+        std::cout << "Parallel info: " << p_per_thread << " molecules per thread" << std::endl;
         std::vector<std::thread> pool;
         for (int i = 0; i < max_threads + 1; i++) {
             int start = p_per_thread * i;
@@ -295,7 +289,6 @@ std::optional<std::string> AP::AtomProc::run(bool cache_result) {
         for (int i = 0; i < pool.size(); i++) {
             pool[i].join();
         }
-
         std::vector<int> non_zeros;
         for (int i = 0; i < ring_carbon_find.rows(); i++) {
             if (ring_carbon_find(i, 0) != 0.0) {
@@ -322,9 +315,7 @@ std::optional<std::string> AP::AtomProc::run(bool cache_result) {
             std::sort(order_i.begin(), order_i.end());
             ring.row((Eigen::Index) i) = order_i;
         });
-        
         // mat_csv_dump("ring.csv", ring);
-
         std::vector<int> indx;
         for (int i = 0; i < ring.rows(); i++) {
             indx.push_back(i);
@@ -334,9 +325,7 @@ std::optional<std::string> AP::AtomProc::run(bool cache_result) {
         });
         Eigen::MatrixXd ring_sorted = ring(indx, Eigen::all);
         Eigen::MatrixXd ring_sort = ring_sorted(Eigen::seq(0, length(ring_sorted) - 1, 4), Eigen::all).transpose();
-
         // mat_csv_dump("ring_sort.csv", ring_sort);
-
         parallel_for(0, length(ring_carbon) - 1, [&](int i) {
             ring_carbon_order.row(i) = ring_carbon(locate_amount(ring_carbon.col(0), ring_sort(i), 1), Eigen::all);
         });
